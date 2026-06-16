@@ -1,26 +1,44 @@
+# IN by CLASS — Codemagic CI
+# iOS: Apple Developer 유료 계정 / Team ID 없이 빌드(--no-codesign) → 서명 안 된 .ipa / Runner.app.
+#      Sideloadly 가 사용자의 무료 Apple ID 로 재서명해 설치한다.
 workflows:
-  ios-workflow:
-    name: iOS Build
-
+  ios-sideloadly:
+    name: iOS Unsigned (Sideloadly)
+    instance_type: mac_mini_m2
+    max_build_duration: 90
     environment:
       flutter: stable
-
+      xcode: latest
+      cocoapods: default
     scripts:
-      - flutter pub get
-      - flutter build ios --release --no-codesign
-
+      - name: Flutter pub get
+        script: flutter pub get
+      - name: Pod install (repo update)
+        script: cd ios && pod repo update && pod install && cd ..
+      - name: Build iOS (no codesign)
+        script: flutter build ios --release --no-codesign
+      - name: Package unsigned .ipa (Sideloadly)
+        script: |
+          set -e
+          cd build/ios/iphoneos
+          rm -rf Payload Runner-unsigned.ipa
+          mkdir Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -r9 Runner-unsigned.ipa Payload >/dev/null
+          cd -
+          echo "Created: build/ios/iphoneos/Runner-unsigned.ipa"
     artifacts:
-      - build/ios/**/*.app
+      - build/ios/iphoneos/Runner-unsigned.ipa
+      - build/ios/iphoneos/Runner.app
 
   android-workflow:
     name: Android Build
-
     environment:
       flutter: stable
-
     scripts:
-      - flutter pub get
-      - flutter build apk --release
-
+      - name: Flutter pub get
+        script: flutter pub get
+      - name: Build APK
+        script: flutter build apk --release
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
