@@ -1,6 +1,7 @@
 # IN by CLASS — Codemagic CI
-# iOS: Apple Developer 유료 계정 / Team ID 없이 빌드(--no-codesign) → 서명 안 된 .ipa / Runner.app.
-#      Sideloadly 가 사용자의 무료 Apple ID 로 재서명해 설치한다.
+# iOS: Apple Developer 유료 계정 / Team ID 없이 unsigned .ipa 생성 → Sideloadly 가 재서명해 설치.
+#  - flutter 의 빌드 래퍼가 마지막에 "Development Team" 을 요구하는 문제를 피하려고,
+#    flutter 로는 설정만 생성(--config-only)하고 실제 빌드는 xcodebuild 로 직접(서명 OFF) 수행한다.
 workflows:
   ios-workflow:
     name: iOS Unsigned (Sideloadly)
@@ -8,28 +9,50 @@ workflows:
     max_build_duration: 90
     environment:
       flutter: stable
-      xcode: latest
+      xcode: 16.4
       cocoapods: default
     scripts:
       - name: Flutter pub get
         script: flutter pub get
-      - name: Pod install (repo update)
+
+      # 실제 빌드 없이 ios/Flutter/Generated.xcconfig 등 설정만 생성(팀 요구 회피).
+      - name: Flutter config only (no build, no codesign)
+        script: flutter build ios --release --no-codesign --config-only
+
+      - name: Pod install
         script: cd ios && pod repo update && pod install && cd ..
-      - name: Build iOS (no codesign)
-        script: flutter build ios --release --no-codesign
-      - name: Package unsigned .ipa (Sideloadly)
+
+      # 코드 서명 완전 비활성으로 archive → unsigned .app 생성.
+      - name: xcodebuild archive (code signing OFF)
         script: |
           set -e
-          cd build/ios/iphoneos
-          rm -rf Payload Runner-unsigned.ipa
-          mkdir Payload
-          cp -R Runner.app Payload/Runner.app
-          zip -r9 Runner-unsigned.ipa Payload >/dev/null
-          cd -
-          echo "Created: build/ios/iphoneos/Runner-unsigned.ipa"
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$CM_BUILD_DIR/build/Runner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM=""
+
+      # archive 안의 Runner.app 을 Payload 로 묶어 unsigned .ipa 생성.
+      - name: Package unsigned .ipa for Sideloadly
+        script: |
+          set -e
+          APP="$CM_BUILD_DIR/build/Runner.xcarchive/Products/Applications/Runner.app"
+          OUT="$CM_BUILD_DIR/Runner-unsigned.ipa"
+          rm -rf "$CM_BUILD_DIR/Payload" "$OUT"
+          mkdir -p "$CM_BUILD_DIR/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/Payload/Runner.app"
+          (cd "$CM_BUILD_DIR" && zip -r9 "$OUT" Payload >/dev/null)
+          echo "Created: $OUT"
     artifacts:
-      - build/ios/iphoneos/Runner-unsigned.ipa
-      - build/ios/iphoneos/Runner.app
+      - Runner-unsigned.ipa
+      - build/Runner.xcarchive
 
   android-workflow:
     name: Android Build
