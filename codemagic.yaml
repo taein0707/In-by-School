@@ -1,24 +1,67 @@
-- name: Package unsigned .ipa for Sideloadly
-  script: |
-    set -e
+workflows:
+  ios-workflow:
+    name: iOS Unsigned (Sideloadly)
+    instance_type: mac_mini_m2
+    max_build_duration: 90
 
-    echo "=== SEARCH Runner.app ==="
-    find build -name "Runner.app"
+    environment:
+      flutter: stable
+      xcode: 16.4
+      cocoapods: default
 
-    APP=$(find build -name "Runner.app" | head -n 1)
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
 
-    if [ -z "$APP" ]; then
-      echo "Runner.app not found"
-      exit 1
-    fi
+      - name: Pod install
+        script: |
+          cd ios
+          pod repo update
+          pod install
+          cd ..
 
-    echo "FOUND: $APP"
+      - name: Build iOS app (no codesign)
+        script: |
+          flutter build ios --release --no-codesign || true
 
-    rm -rf Payload Runner-unsigned.ipa
-    mkdir Payload
+      - name: Package unsigned ipa
+        script: |
+          echo "Searching Runner.app..."
 
-    cp -R "$APP" Payload/Runner.app
+          find build -name "Runner.app"
 
-    zip -r Runner-unsigned.ipa Payload
+          APP=$(find build -name "Runner.app" | head -n 1)
 
-    echo "IPA CREATED"
+          echo "FOUND: $APP"
+
+          if [ -z "$APP" ]; then
+            echo "Runner.app not found"
+            exit 1
+          fi
+
+          rm -rf Payload
+          mkdir Payload
+
+          cp -R "$APP" Payload/Runner.app
+
+          zip -r Runner-unsigned.ipa Payload
+
+    artifacts:
+      - Runner-unsigned.ipa
+      - build/**/Runner.app
+
+  android-workflow:
+    name: Android Build
+
+    environment:
+      flutter: stable
+
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
+
+      - name: Build APK
+        script: flutter build apk --release
+
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
