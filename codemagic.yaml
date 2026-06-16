@@ -1,7 +1,8 @@
 # IN by CLASS — Codemagic CI
 # iOS: Apple Developer 유료 계정 / Team ID 없이 unsigned .ipa 생성 → Sideloadly 가 재서명해 설치.
-#  - flutter 의 빌드 래퍼가 마지막에 "Development Team" 을 요구하는 문제를 피하려고,
-#    flutter 로는 설정만 생성(--config-only)하고 실제 빌드는 xcodebuild 로 직접(서명 OFF) 수행한다.
+#  - 동적 프레임워크(mlkit/flutter_webrtc) 때문에 `xcodebuild archive` 는 embed-sign 단계에서 실패한다.
+#    그래서 archive 대신 `flutter build ios --no-codesign`(build 액션)으로 .app 을 만들고,
+#    빌드 후 flutter 래퍼의 "Development Team" 종료코드는 무시한 뒤(.app 은 이미 생성됨) 직접 패키징한다.
 workflows:
   ios-workflow:
     name: iOS Unsigned (Sideloadly)
@@ -15,44 +16,32 @@ workflows:
       - name: Flutter pub get
         script: flutter pub get
 
-      # 실제 빌드 없이 ios/Flutter/Generated.xcconfig 등 설정만 생성(팀 요구 회피).
-      - name: Flutter config only (no build, no codesign)
-        script: flutter build ios --release --no-codesign --config-only
-
       - name: Pod install
         script: cd ios && pod repo update && pod install && cd ..
 
-      # 코드 서명 완전 비활성으로 archive → unsigned .app 생성.
-      - name: xcodebuild archive (code signing OFF)
+      # build 액션으로 unsigned Runner.app 생성. "Xcode build done" 뒤의 팀 체크 실패는
+      # .app 이 이미 만들어진 뒤이므로 무시(다음 단계에서 존재 여부로 진짜 실패만 가린다).
+      - name: Build iOS app (no codesign)
         script: |
-          set -e
-          xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$CM_BUILD_DIR/build/Runner.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM=""
+          flutter build ios --release --no-codesign \
+            || echo "flutter exited non-zero (post-build team check) — Runner.app 은 생성됐을 것"
 
-      # archive 안의 Runner.app 을 Payload 로 묶어 unsigned .ipa 생성.
       - name: Package unsigned .ipa for Sideloadly
         script: |
           set -e
-          APP="$CM_BUILD_DIR/build/Runner.xcarchive/Products/Applications/Runner.app"
-          OUT="$CM_BUILD_DIR/Runner-unsigned.ipa"
-          rm -rf "$CM_BUILD_DIR/Payload" "$OUT"
-          mkdir -p "$CM_BUILD_DIR/Payload"
-          cp -R "$APP" "$CM_BUILD_DIR/Payload/Runner.app"
-          (cd "$CM_BUILD_DIR" && zip -r9 "$OUT" Payload >/dev/null)
-          echo "Created: $OUT"
+          APP="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP" ]; then
+            echo "ERROR: $APP 가 없습니다 — 빌드가 실제로 실패했습니다."
+            exit 1
+          fi
+          rm -rf Payload Runner-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/Runner.app
+          zip -r9 Runner-unsigned.ipa Payload >/dev/null
+          echo "Created: Runner-unsigned.ipa"
     artifacts:
       - Runner-unsigned.ipa
-      - build/Runner.xcarchive
+      - build/ios/iphoneos/Runner.app
 
   android-workflow:
     name: Android Build
