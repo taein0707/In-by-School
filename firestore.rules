@@ -1,0 +1,448 @@
+rules_version = '2';
+
+// OCL Study — 학습 관리 플랫폼(학생·선생님).
+// 핵심 원칙:
+//  - 토리 성장 데이터(users/{uid}/state·sessions)는 본인만.
+//  - 프로필(users/{uid} 본문)은 본인만 쓰고, 같은 교실의 상대는 읽을 수 있어야 한다
+//    (선생님이 학생 이름·통계를 보고, 학생이 선생님 정보를 본다). 이번 단계는
+//    구현을 단순화해 '인증된 사용자는 다른 프로필을 읽기만' 허용한다. 배포 전
+//    classroomMembers 기반의 정밀 읽기 규칙으로 좁힌다(아래 TODO).
+//  - 배포 컬렉션(assignments/flashcards/aiQuestions)은 선생님(owner)만 생성·수정,
+//    배포 대상 학생은 읽기.
+//  - submissions 는 해당 학생이 쓰고, 담당 선생님이 읽는다.
+//  - notifications 는 수신자가 읽고, 발신자가 만든다(FCM 푸시는 Functions 가 담당).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // ---- 프로필 + 토리 성장 데이터 ----
+    match /users/{uid} {
+      // 공개 프로필 본문(이름/역할/과목)만 인증 사용자가 읽음 — 연결 요청 표시용.
+      // PII(email)는 본문에 저장하지 않고(FirebaseAuth 보관), FCM 토큰 등 민감정보는
+      // 아래 private 서브컬렉션(본인 전용)으로 격리한다(C-2 대응).
+      allow read: if signedIn();
+      allow write: if isSelf(uid);
+
+      // 하위(state/spirit, sessions/*, private/push 등)는 본인만.
+      match /{document=**} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    // ---- 숙제(배포) ----
+    match /assignments/{id} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         request.auth.uid in resource.data.studentUids);
+      allow create, update: if signedIn() &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 제출/진행(학생별) ----
+    match /submissions/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      // 학생만 자기 제출을 생성/수정.
+      allow create, update: if signedIn() &&
+        request.resource.data.studentUid == request.auth.uid;
+      // 삭제: 학생 본인(탈퇴) 또는 담당 선생님(숙제 삭제 연쇄).
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 플래시카드 덱(배포) ----
+    match /flashcardDecks/{id} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         request.auth.uid in resource.data.studentUids);
+      allow create, update: if signedIn() &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 플래시카드 카드 ----
+    // 카드는 teacherUid·studentUids 를 비정규화해 get() 없이 평가(덱과 동일 권한).
+    match /flashcardCards/{id} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         request.auth.uid in resource.data.studentUids);
+      allow create: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow update: if signedIn() &&
+        resource.data.teacherUid == request.auth.uid &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 플래시카드 학습 결과(학생별) ----
+    match /flashcardProgress/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      // 학생만 자기 진행을 생성/수정.
+      allow create, update: if signedIn() &&
+        request.resource.data.studentUid == request.auth.uid;
+      // 삭제: 학생 본인(탈퇴) 또는 담당 선생님(덱 삭제 연쇄).
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- AI 문제 세트(배포) ----
+    match /aiQuestionSets/{id} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         request.auth.uid in resource.data.studentUids);
+      allow create, update: if signedIn() &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- AI 문제(개별) — teacherUid·studentUids 비정규화로 get() 없이 평가 ----
+    match /aiQuestions/{id} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         request.auth.uid in resource.data.studentUids);
+      allow create: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow update: if signedIn() &&
+        resource.data.teacherUid == request.auth.uid &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- AI 문제 결과(학생별) ----
+    match /aiQuestionResults/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      // 학생만 자기 결과를 생성/수정.
+      allow create, update: if signedIn() &&
+        request.resource.data.studentUid == request.auth.uid;
+      // 삭제: 학생 본인(탈퇴) 또는 담당 선생님(세트 삭제 연쇄).
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 스터디 플래너(학습 기록) ----
+    // 학생이 본인 문서를 생성·수정(임시저장/제출), 담당 선생님은 읽기만.
+    // teacherUid 비정규화로 get() 없이 평가(숙제 submissions 와 동일 패턴).
+    match /studyReports/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      // 생성·수정: 학생 본인만(본인 uid 로 고정).
+      allow create, update: if signedIn() &&
+        request.resource.data.studentUid == request.auth.uid;
+      // 삭제(회원 탈퇴 정리): 학생 본인.
+      allow delete: if signedIn() && resource.data.studentUid == request.auth.uid;
+    }
+
+    // ---- 단어 경쟁전(학습 챌린지) ----
+    // 세션은 인증 사용자가 참가 코드로 조회할 수 있고(교실 공유), 생성·관리는 교사만.
+    match /battleSessions/{battleId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+
+      // 참가자 점수 — 본인 문서만 쓰고, 참가자/교사가 읽는다(순위 노출은 클라가 통제).
+      match /players/{uid} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && uid == request.auth.uid;
+        allow delete: if signedIn() &&
+          (uid == request.auth.uid ||
+           get(/databases/$(database)/documents/battleSessions/$(battleId)).data.teacherUid == request.auth.uid);
+      }
+    }
+
+    // ---- 교실(Classroom, P2-0) ----
+    // 교실 메타는 인증 사용자가 읽을 수 있고(이름/설명, 비민감), 생성·수정·삭제는 소유 교사만.
+    match /classrooms/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // 교실 구성원 — 본인(userUid) 또는 담당 교사(teacherUid)만 읽고,
+    // 추가/변경은 담당 교사가, 삭제는 본인 또는 교사가. (teacherUid 비정규화로 get() 없이 평가)
+    match /classroomMembers/{id} {
+      allow read: if signedIn() &&
+        (resource.data.userUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      // 교사가 학생 추가(기존) — get() 없이 평가.
+      // 또는 학생이 가입 코드로 본인 가입(P8 #4): 본인 문서이고, 교실의 teacherUid·joinCode 와
+      // 일치해야 한다(코드를 알아야만 생성 가능). 코드 검증을 위해 classrooms 를 get() 한다.
+      allow create: if signedIn() && (
+        request.resource.data.teacherUid == request.auth.uid ||
+        (request.resource.data.userUid == request.auth.uid &&
+         request.resource.data.role == 'student' &&
+         request.resource.data.joinCode is string &&
+         request.resource.data.joinCode != '' &&
+         exists(/databases/$(database)/documents/classrooms/$(request.resource.data.classroomId)) &&
+         get(/databases/$(database)/documents/classrooms/$(request.resource.data.classroomId)).data.teacherUid == request.resource.data.teacherUid &&
+         get(/databases/$(database)/documents/classrooms/$(request.resource.data.classroomId)).data.joinCode == request.resource.data.joinCode)
+      );
+      allow update: if signedIn() &&
+        request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() &&
+        (resource.data.userUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 이메일→uid 인덱스(P2-2, 교사 학생 초대용) ----
+    // 본인 매핑만 작성. 조회는 인증 사용자(교사가 학생 이메일로 검색).
+    match /userEmails/{emailKey} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ---- 온라인 학습지(Worksheet, P3-1) ----
+    // 읽기: 인증 사용자(교실 콘텐츠). 작성/수정/삭제: 교사 본인.
+    match /worksheets/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+    match /worksheetQuestions/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+    // 제출: 학생 본인 또는 담당 교사가 읽고, 학생 본인만 작성/수정. 점수 보정은 교사도 허용.
+    match /worksheetSubmissions/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (request.resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 수업 활동 도구(P3-2) ----
+    // 자리 배치(문서 id = classroomId): 읽기 인증, 작성/수정/삭제는 교사 본인.
+    match /seatLayouts/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+    // 모둠/발표 추첨 기록: 읽기 인증, 작성/수정/삭제는 교사 본인.
+    match /groupActivities/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 빙고(P4-1) ----
+    // 읽기: 인증 사용자. 생성: 교사 본인. 수정: 참가자(턴 진행) 허용하되 teacherUid 불변(소유권 보호).
+    // 삭제: 교사 본인.
+    match /bingoGames/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow update: if signedIn() && request.resource.data.teacherUid == resource.data.teacherUid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 가로세로 퍼즐(P4-2) ----
+    // 세트: 읽기 인증, 생성/수정/삭제는 교사 본인.
+    match /crosswordSets/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+    // 제출: 학생 본인 또는 담당 교사가 읽고, 학생 본인만 작성/수정.
+    match /crosswordSubmissions/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 퀴즈 대회(P4-3) ----
+    // 대회 문서: 읽기 인증, 생성/수정/삭제는 교사 본인(시작·종료 포함).
+    match /quizCompetitions/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+    // 참가자(점수): 인증 사용자가 랭킹 조회, 작성/수정은 본인, 삭제는 본인 또는 교사.
+    match /quizCompetitionPlayers/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 슬라이드 수업(Lesson, P9-2) ----
+    // 읽기: 인증 사용자(교실 콘텐츠). 작성/수정/삭제는 교사 본인.
+    match /lessons/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+
+      // 실시간 아이디어보드 포스트잇 — 인증 사용자가 읽고/쓴다(학생 제출).
+      match /ideas/{postId} {
+        allow read: if signedIn();
+        allow create: if signedIn();
+        allow update, delete: if signedIn() &&
+          (resource.data.authorUid == request.auth.uid ||
+           get(/databases/$(database)/documents/lessons/$(id)).data.teacherUid == request.auth.uid);
+      }
+    }
+
+    // ---- 학생 응답(질문/퀴즈/입력형, P10 실시간 기반) ----
+    // teacherUid 비정규화로 get() 없이 평가. 읽기: 당사자(학생/교사). 작성: 학생 본인.
+    match /lessonResponses/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update, delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- Teacher Live Mode 세션(P10) — 문서 id = lessonId ----
+    // 읽기: 인증 사용자(학생이 현재 슬라이드를 따라감). 작성/수정/삭제: 담당 교사.
+    match /lessonSessions/{lessonId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 교사 포인터(P10-2) — 교사가 좌표/색을 쓰고 학생이 따라 그린다. ----
+    match /lessonPointers/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 실시간 투표 집계 + 워드클라우드 집계(교사 계산본, P10-2) ----
+    match /lessonVotes/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+    }
+    match /lessonWordCloud/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 익명 질문(P10-3) — 학생 작성, 교사 승인/삭제. 읽기는 인증 사용자(학생은 승인분만 노출은 클라가 통제). ----
+    match /lessonQuestions/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update, delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 아이디어보드 포스트잇(P10-4) — 누구나 보드를 읽고, 학생이 올리고, 작성자/교사가 정리. ----
+    match /lessonIdeas/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorUid == request.auth.uid;
+      allow update, delete: if signedIn() &&
+        (resource.data.authorUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 좋아요 반응(P10-4) — 학생당 (대상,emoji) 토글. 카운트는 인증 사용자가 읽어 집계. ----
+    match /lessonReactions/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.studentUid == request.auth.uid;
+    }
+
+    // ---- 실시간 그림판(P10-2) — 학생이 본인 그림을 쓰고, 당사자(학생/교사)가 읽고 정리. ----
+    match /lessonDrawings/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update, delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- 공지사항(Announcement, P2-1) ----
+    // 읽기: 인증 사용자(교실 비민감 공지 — classrooms 와 동일 수준). 작성/수정/삭제는 교사 본인.
+    match /announcements/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.teacherUid == request.auth.uid;
+    }
+
+    // ---- 참여 상태(presence, P6 웹 전용) ----
+    // 문서 id = studentUid. 학생 본인만 쓰고, 인증 사용자(교실 교사 포함)가 읽는다.
+    // (status/lastSeen 등 비민감 — classrooms 와 동일 수준의 읽기 허용)
+    match /presence/{studentUid} {
+      allow read: if signedIn();
+      allow write: if isSelf(studentUid);
+    }
+
+    // ---- 화면 공유 요청(screenShareRequests, P6) ----
+    // 교사가 생성하고, 학생이 수락/거절(허가 우선). 당사자만 읽고, uid 는 불변.
+    match /screenShareRequests/{id} {
+      allow read: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.teacherUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid) &&
+        request.resource.data.teacherUid == resource.data.teacherUid &&
+        request.resource.data.studentUid == resource.data.studentUid;
+      allow delete: if signedIn() &&
+        (resource.data.studentUid == request.auth.uid ||
+         resource.data.teacherUid == request.auth.uid);
+    }
+
+    // ---- WebRTC 시그널링(P7, 웹 전용) ----
+    // 세션은 당사자(교사/학생)만 읽고, 학생이 생성(동의 후), 양측이 offer/answer 갱신.
+    // uid 는 불변(세션 하이재킹 방지).
+    match /webrtcSessions/{sessionId} {
+      allow read: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         resource.data.studentUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         resource.data.studentUid == request.auth.uid) &&
+        request.resource.data.teacherUid == resource.data.teacherUid &&
+        request.resource.data.studentUid == resource.data.studentUid;
+      allow delete: if signedIn() &&
+        (resource.data.teacherUid == request.auth.uid ||
+         resource.data.studentUid == request.auth.uid);
+
+      // ICE 후보 — teacherUid/studentUid 비정규화로 get() 없이 당사자만 읽고/쓴다.
+      match /iceCandidates/{cid} {
+        allow read: if signedIn() &&
+          (resource.data.teacherUid == request.auth.uid ||
+           resource.data.studentUid == request.auth.uid);
+        allow create: if signedIn() &&
+          (request.resource.data.teacherUid == request.auth.uid ||
+           request.resource.data.studentUid == request.auth.uid);
+        allow delete: if signedIn() &&
+          (resource.data.teacherUid == request.auth.uid ||
+           resource.data.studentUid == request.auth.uid);
+      }
+    }
+
+    // ---- 알림 ----
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.toUid == request.auth.uid;
+      // 발신자가 생성(클라이언트). 수신자는 read 플래그만 갱신.
+      allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if signedIn() && resource.data.toUid == request.auth.uid;
+      // 삭제(회원 탈퇴 정리): 수신자 또는 발신자.
+      allow delete: if signedIn() &&
+        (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid);
+    }
+  }
+}

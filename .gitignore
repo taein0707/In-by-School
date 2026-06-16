@@ -1,0 +1,101 @@
+# =====================================================================
+#  IN by CLASS — Flutter + Firebase .gitignore
+#  ⚠️ 비밀(키/서비스계정/서명)은 절대 커밋하지 않는다.
+# =====================================================================
+
+# ---- Dart / Flutter ----
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+**/build/
+.metadata
+**/doc/api/
+**/ios/Flutter/.last_build_id
+app.*.symbols
+app.*.map.json
+coverage/
+# (pubspec.lock 은 앱이라 커밋 권장 — 무시하지 않음)
+
+# ---- IDE / 에디터 ----
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+.atom/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+*.pyc
+*.class
+
+# ---- Android ----
+android/.gradle/
+android/.kotlin/
+android/.cxx/
+android/captures/
+android/local.properties
+android/key.properties
+/android/app/debug
+/android/app/profile
+/android/app/release
+**/*.keystore
+**/*.jks
+GeneratedPluginRegistrant.*
+
+# ---- iOS / macOS ----
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/ephemeral/
+**/*.mobileprovision
+macos/Pods/
+macos/Flutter/ephemeral/
+
+# ---- 데스크톱(Windows/Linux) ----
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# =====================================================================
+#  Firebase / 비밀 — 절대 커밋 금지
+# =====================================================================
+# Firebase 클라이언트 설정(API 키 포함) — 로컬에만 두고 커밋하지 않는다.
+**/google-services.json
+**/GoogleService-Info.plist
+lib/data/firebase/firebase_options.dart
+
+# Firebase 도구/디버그
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.runtimeconfig.json
+
+# 서비스 계정 / 개인키 / 인증서
+*serviceAccount*.json
+*-adminsdk-*.json
+*.pem
+*.p12
+*.cer
+
+# 환경변수
+.env
+.env.*
+
+# ---- Cloud Functions (Node) ----
+node_modules/
+functions/node_modules/
+functions/.env
+functions/.env.*
+functions/.runtimeconfig.json

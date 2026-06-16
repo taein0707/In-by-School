@@ -1,0 +1,109 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "flashcardCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deckId", "order": "ASCENDING" },
+        { "fieldPath": "studentUids", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "flashcardCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deckId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "flashcardProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deckId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "aiQuestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setId", "order": "ASCENDING" },
+        { "fieldPath": "studentUids", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "aiQuestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "aiQuestionResults",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignmentId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "classroomMembers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classroomId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "worksheetSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "worksheetId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "worksheetQuestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "worksheetId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "groupActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classroomId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "crosswordSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quizCompetitionPlayers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "competitionId", "order": "ASCENDING" },
+        { "fieldPath": "teacherUid", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
