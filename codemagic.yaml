@@ -1,0 +1,26 @@
+workflows:
+  ios-workflow:
+    name: iOS Build
+
+    environment:
+      flutter: stable
+
+    scripts:
+      - flutter pub get
+      - flutter build ios --release --no-codesign
+
+    artifacts:
+      - build/ios/**/*.app
+
+  android-workflow:
+    name: Android Build
+
+    environment:
+      flutter: stable
+
+    scripts:
+      - flutter pub get
+      - flutter build apk --release
+
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
