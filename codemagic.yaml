@@ -1,56 +1,24 @@
-# IN by CLASS — Codemagic CI
-# iOS: Apple Developer 유료 계정 / Team ID 없이 unsigned .ipa 생성 → Sideloadly 가 재서명해 설치.
-#  - 동적 프레임워크(mlkit/flutter_webrtc) 때문에 `xcodebuild archive` 는 embed-sign 단계에서 실패한다.
-#    그래서 archive 대신 `flutter build ios --no-codesign`(build 액션)으로 .app 을 만들고,
-#    빌드 후 flutter 래퍼의 "Development Team" 종료코드는 무시한 뒤(.app 은 이미 생성됨) 직접 패키징한다.
-workflows:
-  ios-workflow:
-    name: iOS Unsigned (Sideloadly)
-    instance_type: mac_mini_m2
-    max_build_duration: 90
-    environment:
-      flutter: stable
-      xcode: 16.4
-      cocoapods: default
-    scripts:
-      - name: Flutter pub get
-        script: flutter pub get
+- name: Package unsigned .ipa for Sideloadly
+  script: |
+    set -e
 
-      - name: Pod install
-        script: cd ios && pod repo update && pod install && cd ..
+    echo "=== SEARCH Runner.app ==="
+    find build -name "Runner.app"
 
-      # build 액션으로 unsigned Runner.app 생성. "Xcode build done" 뒤의 팀 체크 실패는
-      # .app 이 이미 만들어진 뒤이므로 무시(다음 단계에서 존재 여부로 진짜 실패만 가린다).
-      - name: Build iOS app (no codesign)
-        script: |
-          flutter build ios --release --no-codesign \
-            || echo "flutter exited non-zero (post-build team check) — Runner.app 은 생성됐을 것"
+    APP=$(find build -name "Runner.app" | head -n 1)
 
-      - name: Package unsigned .ipa for Sideloadly
-        script: |
-          set -e
-          APP="build/ios/iphoneos/Runner.app"
-          if [ ! -d "$APP" ]; then
-            echo "ERROR: $APP 가 없습니다 — 빌드가 실제로 실패했습니다."
-            exit 1
-          fi
-          rm -rf Payload Runner-unsigned.ipa
-          mkdir Payload
-          cp -R "$APP" Payload/Runner.app
-          zip -r9 Runner-unsigned.ipa Payload >/dev/null
-          echo "Created: Runner-unsigned.ipa"
-    artifacts:
-      - Runner-unsigned.ipa
-      - build/ios/iphoneos/Runner.app
+    if [ -z "$APP" ]; then
+      echo "Runner.app not found"
+      exit 1
+    fi
 
-  android-workflow:
-    name: Android Build
-    environment:
-      flutter: stable
-    scripts:
-      - name: Flutter pub get
-        script: flutter pub get
-      - name: Build APK
-        script: flutter build apk --release
-    artifacts:
-      - build/app/outputs/flutter-apk/*.apk
+    echo "FOUND: $APP"
+
+    rm -rf Payload Runner-unsigned.ipa
+    mkdir Payload
+
+    cp -R "$APP" Payload/Runner.app
+
+    zip -r Runner-unsigned.ipa Payload
+
+    echo "IPA CREATED"
